@@ -5,6 +5,7 @@
 #include <Psapi.h>
 #include <iostream>
 #include <tchar.h>
+#include <ranges>
 
 struct HandleDisposer {
     using pointer = HANDLE;
@@ -74,6 +75,7 @@ ULONGLONG MemExternal::writeJmpRip(HANDLE handle, ULONGLONG instructionAddr, ULO
     ULONGLONG oldAddr = readJmpRip(handle, instructionAddr);
 
     ULONG oldProt;
+    ULONG temp;
 
     if (!VirtualProtectEx(handle, (LPVOID)(instructionAddr + 6), sizeof(targetAddr), PAGE_EXECUTE_READWRITE, &oldProt)) {
 		spdlog::error("Failed to change memory protection! Err: {}", GetLastError());
@@ -82,7 +84,8 @@ ULONGLONG MemExternal::writeJmpRip(HANDLE handle, ULONGLONG instructionAddr, ULO
         spdlog::error("Failed to overwrite jmp rip! Err: {}", GetLastError());
         return 0;
     }
-	VirtualProtectEx(handle, (LPVOID)(instructionAddr + 6), sizeof(targetAddr), oldProt, &oldProt);
+    
+	VirtualProtectEx(handle, (LPVOID)(instructionAddr + 6), sizeof(targetAddr), oldProt, &temp);
 
     return oldAddr;
 }
@@ -281,7 +284,7 @@ void MemExternal::resumeThreads(HANDLE handle)
 
     std::vector<DWORD> threadIds = GetThreadIds(processId);
 
-    for (DWORD threadId : threadIds) {
+    for (DWORD threadId : threadIds | std::views::reverse) {
         HANDLE hThread = OpenThread(THREAD_SUSPEND_RESUME, FALSE, threadId);
         if (hThread != NULL) {
             if (ResumeThread(hThread) == (DWORD)-1);

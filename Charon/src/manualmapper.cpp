@@ -4,20 +4,12 @@
 #include <spdlog/spdlog.h>
 #include <iostream>
 
-using NtQuerySystemInformation_t = int32_t(__stdcall*)(int32_t SystemInformationClass, PVOID SystemInformation, ULONG SystemInformationLength, PULONG ReturnLength);
-
 SCF_WRAP_START;
-int32_t __stdcall NtQuerySystemInformation(
-	int32_t SystemInformationClass,
-	PVOID SystemInformation,
-	ULONG SystemInformationLength,
-	PULONG ReturnLength
-) {
+void detour() {
 	SCF_START;
 
-	//get stack
-	auto Original = reinterpret_cast<NtQuerySystemInformation_t>(Stack[1]);
-	return Original(SystemInformationClass,SystemInformation,SystemInformationLength,ReturnLength);
+	int a = 1 + 2;
+	//((uintptr_t(__fastcall*)(uintptr_t, const char*, ...))(0x7FF6FC0D0000 + 0x14C8360))(3LL, "2c-client on top");
 
 	SCF_END;
 }
@@ -30,18 +22,16 @@ void ManualMapper::inject(HANDLE handle, const std::string& dllPath) {
 	HMODULE dllBase = /*_allocDll(handle, dllPath)*/(HMODULE)1;
 	if (dllBase) {
 		spdlog::info("Successfully allocated dll in target process.");
-		ULONGLONG statusAddr = _createStatus(handle);
 
 		HMODULE ntdll = MemExternal::getLoadedModule(handle, "ntdll.dll");
 		ULONGLONG functionAddr = (ULONGLONG)ntdll + MemExternal::getExportsFunctions(handle, ntdll)["NtQuerySystemInformation"];
 
 		ULONGLONG stub = MemExternal::readJmp32Rel(handle, functionAddr);
-
+		ULONGLONG rbase = (ULONGLONG)MemExternal::getLoadedModule(handle, "RobloxPlayerBeta.exe");
 		//dont even ask. (ULONGLONG)NtQuerySystemInformation for some reason is a jmp instruction pointing to the actual code, so i read it here
-		ULONGLONG aNtQuerySystemInformation = MemExternal::readJmp32Rel(GetCurrentProcess(), (ULONGLONG)NtQuerySystemInformation);
+		ULONGLONG detourFunc = MemExternal::readJmp32Rel(GetCurrentProcess(), (ULONGLONG)detour);
 
-		ULONGLONG detourPage = _createDetour(handle, (NtQuerySystemInformation_t)aNtQuerySystemInformation, (ULONGLONG)dllBase, stub, functionAddr);
-		FlushInstructionCache(handle, (LPVOID)stub, 16);
+		ULONGLONG detourPage = _createDetour(handle, (void(__stdcall*)())detourFunc, (ULONGLONG)dllBase, stub, functionAddr);
 	}
 
 }
@@ -112,17 +102,19 @@ ULONGLONG ManualMapper::_calculateLocalFuncSize(ULONGLONG funcBase)
 	
 }
 
-ULONGLONG ManualMapper::_createStatus(HANDLE handle)
+LPVOID ManualMapper::_createStatus(HANDLE handle)
 {
 	LPVOID allocBase = VirtualAllocEx(handle, 0, sizeof(Status), MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
 	if (!allocBase) {
 		spdlog::error("Failed to allocate memory for status in target process. Err: {}", GetLastError());
 		return 0;
 	}
-
+	
 	Status newStatus = STATUS_BUSY;
 	if (!WriteProcessMemory(handle, allocBase, &newStatus, sizeof(Status), 0)) {
 		spdlog::error("Failed to write start status in target process. Err: {}", GetLastError());
 		return 0;
 	}
+
+	return allocBase;
 }

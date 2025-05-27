@@ -8,7 +8,7 @@ using Stk_t = void**;
 #define SCF_WRAP_END _Pragma("optimize(\"\", on)")
 
 #define SCF_END goto __scf_skip_end;__debugbreak();__halt();__scf_skip_end:{};
-constexpr ULONG SCF_END_MARKER = 0xF4CC02EB; //^^ the above instructions translate to this
+constexpr ULONG SCF_END_MARKER = 0x02EB04EB; //^^ the above instructions translate to this
 constexpr ULONGLONG SCF_STACK_PLACEHOLDER = 0x1493028DEAD;
 
 #define SCF_STACK *const_cast<Stk_t*>(&__scf_ptr_stk);
