@@ -122,10 +122,6 @@ namespace ManualMapper {
 		ULONGLONG pGetModuleHandleA = (ULONGLONG)GetProcAddress(kernelBase, "GetModuleHandleA");
 		stack.push_back(pGetModuleHandleA);
 
-		HMODULE kernel32 = MemExternal::getLoadedModule(handle, "kernel32.dll");
-		ULONGLONG pRtlAddFunctionTable = (ULONGLONG)GetProcAddress(kernelBase, "RtlAddFunctionTable");
-		stack.push_back(pRtlAddFunctionTable);
-
 		//write the stack
 		ULONGLONG stackAddrEnum = stackAddr;
 		for (ULONGLONG each : stack) {

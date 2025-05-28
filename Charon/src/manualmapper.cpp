@@ -7,16 +7,14 @@
 #define RELOC_FLAG(RelInfo) (((RelInfo) >> 12) == IMAGE_REL_BASED_DIR64)
 
 SCF_WRAP_START;
-void __stdcall detour() {
+void detour() {
 	SCF_START;
-	using RtlAddFunctionTable_t = BOOL(WINAPI*)(PRUNTIME_FUNCTION, DWORD, DWORD64);
 
 	ULONGLONG dll = reinterpret_cast<ULONGLONG>(Stack[0]);
 	auto status = reinterpret_cast<ULONG*>(Stack[1]);
 	auto _LoadLibraryA = reinterpret_cast<decltype(&LoadLibraryA)>(Stack[2]);
 	auto _GetProcAddress = reinterpret_cast<decltype(&GetProcAddress)>(Stack[3]);
 	auto _GetModuleHandleA = reinterpret_cast<decltype(&GetModuleHandleA)>(Stack[4]);
-	auto _RtlAddFunctionTable = reinterpret_cast<RtlAddFunctionTable_t>(Stack[5]);
 
 
 	auto* Dos = reinterpret_cast<IMAGE_DOS_HEADER*>(dll);
@@ -43,20 +41,6 @@ void __stdcall detour() {
 				pRelocData = reinterpret_cast<IMAGE_BASE_RELOCATION*>(reinterpret_cast<BYTE*>(pRelocData) + pRelocData->SizeOfBlock);
 			}
 		}
-	}
-
-	auto& sehDir = Opt->DataDirectory[IMAGE_DIRECTORY_ENTRY_EXCEPTION];
-	if (sehDir.Size && sehDir.VirtualAddress) {
-		auto* pdata = reinterpret_cast<PRUNTIME_FUNCTION>(dll + sehDir.VirtualAddress);
-		size_t count = sehDir.Size / sizeof(RUNTIME_FUNCTION);
-
-		for (size_t i = 0; i < count; ++i) {
-			pdata[i].BeginAddress += (DWORD)(dll - Opt->ImageBase);
-			pdata[i].EndAddress += (DWORD)(dll - Opt->ImageBase);
-			if (pdata[i].UnwindData < Size)
-				pdata[i].UnwindData += (DWORD)(dll - Opt->ImageBase);
-		}
-		//_RtlAddFunctionTable(pdata, (DWORD)count, (ULONGLONG)dll);
 	}
 
 	*status = ManualMapper::STATUS_2;
