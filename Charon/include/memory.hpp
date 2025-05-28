@@ -12,17 +12,21 @@ namespace MemExternal {
 	bool handleIsStillValid(HANDLE handle);
 
 	ULONGLONG readJmp32Rel(HANDLE handle, ULONGLONG instructionAddr);
-	ULONGLONG readJmpRip(HANDLE handle, ULONGLONG instructionAddr);
-	ULONGLONG writeJmpRip(HANDLE handle, ULONGLONG instructionAddr, ULONGLONG targetAddr);
+	ULONGLONG readJmpAbs(HANDLE handle, ULONGLONG instructionAddr);
+	ULONGLONG writeJmpAbs(HANDLE handle, ULONGLONG instructionAddr, ULONGLONG targetAddr);
 
 	std::unordered_map<std::string, ULONG> getExportsFunctions(HANDLE handle, HMODULE module);
 	HMODULE getLoadedModule(HANDLE handle, const char* modName);
+	ULONG getModuleSize(HANDLE handle, HMODULE module);
 
 	//for testing
-	void suspendThreads(HANDLE handle);
-	void resumeThreads(HANDLE handle);
-	std::vector<ULONG> GetThreadIds(ULONG processId);
+	void suspendAllThreads(HANDLE handle);
+	void resumeAllThreads(HANDLE handle);
+	void suspendByfronThreads(HANDLE handle);
+	void resumeByfronThreads(HANDLE handle);
 
+	std::vector<ULONG> GetThreadIds(ULONG processId);
+	ULONGLONG getThreadStartAddr(HANDLE threadHandle);
 }
 
 namespace MemInternal {

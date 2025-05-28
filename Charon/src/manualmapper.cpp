@@ -4,22 +4,121 @@
 #include <spdlog/spdlog.h>
 #include <iostream>
 
-SCF_WRAP_START;
-void detour() {
-	SCF_START;
+#define RELOC_FLAG(RelInfo) (((RelInfo) >> 12) == IMAGE_REL_BASED_DIR64)
 
-	int a = 1 + 2;
-	//((uintptr_t(__fastcall*)(uintptr_t, const char*, ...))(0x7FF6FC0D0000 + 0x14C8360))(3LL, "2c-client on top");
+SCF_WRAP_START;
+void __stdcall detour() {
+	SCF_START;
+	using RtlAddFunctionTable_t = BOOL(WINAPI*)(PRUNTIME_FUNCTION, DWORD, DWORD64);
+
+	ULONGLONG dll = reinterpret_cast<ULONGLONG>(Stack[0]);
+	auto status = reinterpret_cast<ULONG*>(Stack[1]);
+	auto _LoadLibraryA = reinterpret_cast<decltype(&LoadLibraryA)>(Stack[2]);
+	auto _GetProcAddress = reinterpret_cast<decltype(&GetProcAddress)>(Stack[3]);
+	auto _GetModuleHandleA = reinterpret_cast<decltype(&GetModuleHandleA)>(Stack[4]);
+	auto _RtlAddFunctionTable = reinterpret_cast<RtlAddFunctionTable_t>(Stack[5]);
+
+
+	auto* Dos = reinterpret_cast<IMAGE_DOS_HEADER*>(dll);
+	auto* Nt = reinterpret_cast<IMAGE_NT_HEADERS*>(dll + Dos->e_lfanew);
+	auto* Opt = &Nt->OptionalHeader;
+	auto Size = Opt->SizeOfImage;
+	uintptr_t LocationDelta = dll - Opt->ImageBase;
+	if (LocationDelta) {
+		auto& RelocDir = Opt->DataDirectory[IMAGE_DIRECTORY_ENTRY_BASERELOC];
+		if (RelocDir.Size) {
+			auto* pRelocData = reinterpret_cast<IMAGE_BASE_RELOCATION*>(dll + RelocDir.VirtualAddress);
+			const auto* pRelocEnd = reinterpret_cast<IMAGE_BASE_RELOCATION*>(reinterpret_cast<uintptr_t>(pRelocData) + RelocDir.Size);
+
+			while (pRelocData < pRelocEnd && pRelocData->SizeOfBlock) {
+				UINT EntryCount = (pRelocData->SizeOfBlock - sizeof(IMAGE_BASE_RELOCATION)) / sizeof(WORD);
+				WORD* Relocs = reinterpret_cast<WORD*>(pRelocData + 1);
+
+				for (UINT i = 0; i < EntryCount; ++i, ++Relocs) {
+					if (RELOC_FLAG(*Relocs)) {
+						UINT_PTR* Patch = reinterpret_cast<UINT_PTR*>(dll + pRelocData->VirtualAddress + ((*Relocs) & 0xFFF));
+						*Patch += LocationDelta;
+					}
+				}
+				pRelocData = reinterpret_cast<IMAGE_BASE_RELOCATION*>(reinterpret_cast<BYTE*>(pRelocData) + pRelocData->SizeOfBlock);
+			}
+		}
+	}
+
+	auto& sehDir = Opt->DataDirectory[IMAGE_DIRECTORY_ENTRY_EXCEPTION];
+	if (sehDir.Size && sehDir.VirtualAddress) {
+		auto* pdata = reinterpret_cast<PRUNTIME_FUNCTION>(dll + sehDir.VirtualAddress);
+		size_t count = sehDir.Size / sizeof(RUNTIME_FUNCTION);
+
+		for (size_t i = 0; i < count; ++i) {
+			pdata[i].BeginAddress += (DWORD)(dll - Opt->ImageBase);
+			pdata[i].EndAddress += (DWORD)(dll - Opt->ImageBase);
+			if (pdata[i].UnwindData < Size)
+				pdata[i].UnwindData += (DWORD)(dll - Opt->ImageBase);
+		}
+		//_RtlAddFunctionTable(pdata, (DWORD)count, (ULONGLONG)dll);
+	}
+
+	*status = ManualMapper::STATUS_2;
+	ULONGLONG entryAddr = (ULONGLONG)dll + Opt->AddressOfEntryPoint;
+	*status = entryAddr;
+
+	auto& ImportDir = Opt->DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT];
+	if (ImportDir.Size) {
+		auto* ImportDesc = reinterpret_cast<IMAGE_IMPORT_DESCRIPTOR*>(dll + ImportDir.VirtualAddress);
+		while (ImportDesc->Name) {
+			char* ModName = reinterpret_cast<char*>(dll + ImportDesc->Name);
+			HMODULE Mod = _GetModuleHandleA(ModName);
+			if (!Mod) Mod = _LoadLibraryA(ModName);
+			if (!Mod) { ++ImportDesc; continue; }
+
+			auto* Dos = reinterpret_cast<IMAGE_DOS_HEADER*>(Mod);
+			auto* Nt = reinterpret_cast<IMAGE_NT_HEADERS*>((uintptr_t)Mod + Dos->e_lfanew);
+			auto SizeOfImage = Nt->OptionalHeader.SizeOfImage;
+
+			uintptr_t* Thunk = reinterpret_cast<uintptr_t*>(dll + ImportDesc->OriginalFirstThunk);
+			uintptr_t* Func = reinterpret_cast<uintptr_t*>(dll + ImportDesc->FirstThunk);
+			if (!Thunk) Thunk = Func;
+
+			while (*Thunk) {
+				if (IMAGE_SNAP_BY_ORDINAL(*Thunk)) {
+					*Func = (uintptr_t)_GetProcAddress(Mod, reinterpret_cast<char*>(*Thunk & 0xFFFF));
+				}
+				else {
+					auto* Import = reinterpret_cast<IMAGE_IMPORT_BY_NAME*>(dll + *Thunk);
+					*Func = (uintptr_t)_GetProcAddress(Mod, Import->Name);
+				}
+				++Thunk; ++Func;
+			}
+			++ImportDesc;
+		}
+	}
+	*status = ManualMapper::STATUS_3;
+
+	auto& TlsDir = Opt->DataDirectory[IMAGE_DIRECTORY_ENTRY_TLS];
+	if (TlsDir.Size) {
+		auto* Tls = reinterpret_cast<IMAGE_TLS_DIRECTORY*>(dll + TlsDir.VirtualAddress);
+		if (Tls->AddressOfCallBacks) {
+			auto* Callbacks = reinterpret_cast<PIMAGE_TLS_CALLBACK*>(Tls->AddressOfCallBacks);
+			while (*Callbacks) {
+				(*Callbacks)((LPVOID)dll, DLL_PROCESS_ATTACH, nullptr);
+				++Callbacks;
+			}
+		}
+	}
+	*status = ManualMapper::STATUS_4;
+
+	
+	auto Entry = reinterpret_cast<int(__stdcall*)(HMODULE, DWORD, void*)>(entryAddr);
+	Entry(reinterpret_cast<HMODULE>(dll), DLL_PROCESS_ATTACH, nullptr);
 
 	SCF_END;
 }
 SCF_WRAP_END;
 
-void myFunctionEnd() {}
-
 void ManualMapper::inject(HANDLE handle, const std::string& dllPath) {
 
-	HMODULE dllBase = /*_allocDll(handle, dllPath)*/(HMODULE)1;
+	HMODULE dllBase = _allocDll(handle, dllPath);
 	if (dllBase) {
 		spdlog::info("Successfully allocated dll in target process.");
 
@@ -27,9 +126,14 @@ void ManualMapper::inject(HANDLE handle, const std::string& dllPath) {
 		ULONGLONG functionAddr = (ULONGLONG)ntdll + MemExternal::getExportsFunctions(handle, ntdll)["NtQuerySystemInformation"];
 
 		ULONGLONG stub = MemExternal::readJmp32Rel(handle, functionAddr);
-		ULONGLONG rbase = (ULONGLONG)MemExternal::getLoadedModule(handle, "RobloxPlayerBeta.exe");
-		//dont even ask. (ULONGLONG)NtQuerySystemInformation for some reason is a jmp instruction pointing to the actual code, so i read it here
-		ULONGLONG detourFunc = MemExternal::readJmp32Rel(GetCurrentProcess(), (ULONGLONG)detour);
+
+		//this is needed in debug mode for some reason..
+		ULONGLONG detourFunc;
+		#ifdef _DEBUG //thanks debug mode very cool
+			detourFunc = MemExternal::readJmp32Rel(GetCurrentProcess(), (ULONGLONG)detour);
+		#else
+			detourFunc = (ULONGLONG)detour;
+		#endif
 
 		ULONGLONG detourPage = _createDetour(handle, (void(__stdcall*)())detourFunc, (ULONGLONG)dllBase, stub, functionAddr);
 	}
@@ -86,11 +190,9 @@ ULONGLONG ManualMapper::_calculateLocalFuncSize(ULONGLONG funcBase)
 			break;
 		}
 		case 0xC2: {
-			size += 3;
 			goto return_size;
 		}
 		case 0xC3: {
-			size++;
 			goto return_size;
 		}
 		}

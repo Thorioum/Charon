@@ -1,4 +1,5 @@
 #include "../include/memory.hpp"
+#include "../include/def.hpp"
 #include <spdlog/spdlog.h>
 #include <TlHelp32.h>
 #include <memory>
@@ -7,6 +8,13 @@
 #include <tchar.h>
 #include <ranges>
 
+typedef ULONG(WINAPI* NtQueryInformationThread_t)(
+    HANDLE ThreadHandle,
+    THREADINFOCLASS ThreadInformationClass,
+    PVOID ThreadInformation,
+    ULONG ThreadInformationLength,
+    PULONG ReturnLength
+    );
 struct HandleDisposer {
     using pointer = HANDLE;
     void operator()(HANDLE handle) const {
@@ -62,7 +70,7 @@ ULONGLONG MemExternal::readJmp32Rel(HANDLE handle, ULONGLONG instructionAddr) {
     return ((instructionAddr + 5) + rva);
 }
 
-ULONGLONG MemExternal::readJmpRip(HANDLE handle, ULONGLONG instructionAddr) {
+ULONGLONG MemExternal::readJmpAbs(HANDLE handle, ULONGLONG instructionAddr) {
     ULONGLONG addr = 0;
     if (!ReadProcessMemory(handle, (LPVOID)(instructionAddr + 6), &addr, sizeof(addr), 0)) {
 		spdlog::error("Failed to read jmp rip! Err: {}", GetLastError());
@@ -71,8 +79,8 @@ ULONGLONG MemExternal::readJmpRip(HANDLE handle, ULONGLONG instructionAddr) {
     return addr;
 }
 
-ULONGLONG MemExternal::writeJmpRip(HANDLE handle, ULONGLONG instructionAddr, ULONGLONG targetAddr) {
-    ULONGLONG oldAddr = readJmpRip(handle, instructionAddr);
+ULONGLONG MemExternal::writeJmpAbs(HANDLE handle, ULONGLONG instructionAddr, ULONGLONG targetAddr) {
+    ULONGLONG oldAddr = readJmpAbs(handle, instructionAddr);
 
     ULONG oldProt;
     ULONG temp;
@@ -239,6 +247,15 @@ HMODULE MemExternal::getLoadedModule(HANDLE handle, const char* modName) {
     CloseHandle(hSnap);
     return NULL;
 }
+ULONG MemExternal::getModuleSize(HANDLE handle, HMODULE module)
+{
+    MODULEINFO moduleInfo;
+    if (GetModuleInformation(handle, module, &moduleInfo, sizeof(moduleInfo)))
+    {
+        return moduleInfo.SizeOfImage;
+    }
+    return 0;
+}
 std::vector<ULONG> MemExternal::GetThreadIds(ULONG processId) {
     std::vector<ULONG> threadIds;
     HANDLE threadSnap = CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0);
@@ -258,7 +275,46 @@ std::vector<ULONG> MemExternal::GetThreadIds(ULONG processId) {
     }
     return threadIds;
 }
-void MemExternal::suspendThreads(HANDLE handle) {
+
+ULONGLONG MemExternal::getThreadStartAddr(HANDLE threadHandle)
+{
+    if (threadHandle == NULL || threadHandle == INVALID_HANDLE_VALUE) {
+        return 0;
+    }
+
+    HMODULE hNtDll = LoadLibraryA("ntdll.dll");
+    if (!hNtDll) {
+        std::cerr << "Failed to load ntdll.dll. Error: " << GetLastError() << std::endl;
+        return 0;
+    }
+
+    NtQueryInformationThread_t pNtQueryInformationThread =
+        (NtQueryInformationThread_t)GetProcAddress(hNtDll, "NtQueryInformationThread");
+    if (!pNtQueryInformationThread) {
+        std::cerr << "Failed to get NtQueryInformationThread. Error: " << GetLastError() << std::endl;
+        FreeLibrary(hNtDll);
+        return 0;
+    }
+
+    ULONG_PTR startAddress = 0;
+    ULONG status = pNtQueryInformationThread(
+        threadHandle,
+        ThreadQuerySetWin32StartAddress,
+        &startAddress,
+        sizeof(PVOID),
+        nullptr
+    );
+
+    FreeLibrary(hNtDll);
+
+    if (status != 0) {
+        std::cerr << "NtQueryInformationThread failed. NTSTATUS: " << std::hex << status << std::endl;
+        return 0;
+    }
+
+    return startAddress;
+}
+void MemExternal::suspendAllThreads(HANDLE handle) {
     DWORD processId = GetProcessId(handle);
     if (processId == 0) {
         return;
@@ -267,7 +323,7 @@ void MemExternal::suspendThreads(HANDLE handle) {
     std::vector<DWORD> threadIds = GetThreadIds(processId);
 
     for (DWORD threadId : threadIds) {
-        HANDLE hThread = OpenThread(THREAD_SUSPEND_RESUME, FALSE, threadId);
+        HANDLE hThread = OpenThread(THREAD_ALL_ACCESS, FALSE, threadId);
         if (hThread != NULL) {
             if (SuspendThread(hThread) == (DWORD)-1);
             CloseHandle(hThread);
@@ -275,7 +331,7 @@ void MemExternal::suspendThreads(HANDLE handle) {
     }
     return;
 }
-void MemExternal::resumeThreads(HANDLE handle)
+void MemExternal::resumeAllThreads(HANDLE handle)
 {
     DWORD processId = GetProcessId(handle);
     if (processId == 0) {
@@ -289,6 +345,55 @@ void MemExternal::resumeThreads(HANDLE handle)
         if (hThread != NULL) {
             if (ResumeThread(hThread) == (DWORD)-1);
             CloseHandle(hThread);
+        }
+    }
+    return;
+}
+
+void MemExternal::suspendByfronThreads(HANDLE handle)
+{
+    DWORD processId = GetProcessId(handle);
+    if (processId == 0) {
+        return;
+    }
+
+    std::vector<DWORD> threadIds = GetThreadIds(processId);
+
+    HMODULE byfron = MemExternal::getLoadedModule(handle, "RobloxPlayerBeta.dll");
+    ULONGLONG byfronSize = MemExternal::getModuleSize(handle, byfron);
+
+    for (DWORD threadId : threadIds) {
+        HANDLE hThread = OpenThread(THREAD_ALL_ACCESS, FALSE, threadId);
+        if (hThread != NULL) {
+            ULONG_PTR start = getThreadStartAddr(hThread);
+            if (start > (ULONGLONG)byfron && start < (ULONGLONG)byfron + byfronSize) {
+                if (SuspendThread(hThread) == (DWORD)-1);
+                CloseHandle(hThread);
+            }
+        }
+    }
+    return;
+}
+void MemExternal::resumeByfronThreads(HANDLE handle)
+{
+    DWORD processId = GetProcessId(handle);
+    if (processId == 0) {
+        return;
+    }
+
+    std::vector<DWORD> threadIds = GetThreadIds(processId);
+
+    HMODULE byfron = MemExternal::getLoadedModule(handle, "RobloxPlayerBeta.dll");
+    ULONGLONG byfronSize = MemExternal::getModuleSize(handle, byfron);
+
+    for (DWORD threadId : threadIds) {
+        HANDLE hThread = OpenThread(THREAD_ALL_ACCESS, FALSE, threadId);
+        if (hThread != NULL) {
+            ULONG_PTR start = getThreadStartAddr(hThread);
+            if (start > (ULONGLONG)byfron && start < (ULONGLONG)byfron + byfronSize) {
+                if (ResumeThread(hThread) == (DWORD)-1);
+                CloseHandle(hThread);
+            }
         }
     }
     return;

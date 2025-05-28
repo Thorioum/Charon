@@ -22,7 +22,7 @@ int main(int argc, char* argv[]) {
 	HANDLE robloxHandle = MemExternal::WaitForProcess(PROCESS_ALL_ACCESS, FALSE, "RobloxPlayerBeta.exe").first;
 	spdlog::info("Succesfully opened handle to Roblox!");
 
-	ManualMapper::inject(robloxHandle, "test.dll");
+	ManualMapper::inject(robloxHandle, "testing.dll");
 
 	CloseHandle(robloxHandle);
 }
