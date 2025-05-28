@@ -143,13 +143,16 @@ namespace ManualMapper {
 		ULONG oldProt;
 		VirtualProtectEx(handle, (LPVOID)(stub + 6), sizeof(ULONGLONG), PAGE_EXECUTE_READWRITE, &oldProt);
 
+		ULONG lastStatus = -1;
 		while (true) {
 			ULONG status = 0;
 			if (!ReadProcessMemory(handle, (LPVOID)statusAddr, &status, sizeof(status), 0)) {
 				spdlog::error("Failed to read status! Err: {}", GetLastError());
 				break;
 			}
-			spdlog::info("Status: {}", status);
+			if (lastStatus != status) {
+				spdlog::info("Status: {}", status);
+			}
 			if (status == Status::STATUS_SUCCESS) {
 				spdlog::info("successfully reached the end of the hook");
 				MemExternal::resumeByfronThreads(handle);
@@ -159,6 +162,7 @@ namespace ManualMapper {
 
 				break;
 			}
+			lastStatus = status;
 		}
 
 		delete[] funcBytes;
