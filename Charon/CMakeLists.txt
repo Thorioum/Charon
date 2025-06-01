@@ -19,3 +19,11 @@ FetchContent_Declare (
 )
 FetchContent_MakeAvailable (spdlog)
 target_link_libraries(Charon PRIVATE spdlog::spdlog)	
+
+FetchContent_Declare (
+	argparse 
+	URL https://github.com/p-ranav/argparse/archive/refs/tags/v3.1.zip
+	DOWNLOAD_EXTRACT_TIMESTAMP TRUE
+)
+FetchContent_MakeAvailable (argparse)
+target_link_libraries(Charon PRIVATE argparse)

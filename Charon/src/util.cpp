@@ -16,21 +16,16 @@ void Util::resetTextColor() {
 
 std::vector<UCHAR> Util::readFile(const std::string& path)
 {
-	std::ifstream stream = std::ifstream(path,  std::ios::ate | std::ios::binary);
+	std::ifstream file = std::ifstream(path,  std::ios::ate | std::ios::binary);
+	file.seekg(0, std::ios::end);
+	std::streamsize size = file.tellg();
+	file.seekg(0, std::ios::beg);
 
-	if (!stream.is_open()) {
-		return {};
+	std::vector<UCHAR> buffer(size);
+	if (file.read((char*)buffer.data(), size)) {
+		return buffer;
 	}
 
-	size_t fileSize = static_cast<size_t>(stream.tellg());
-	stream.seekg(0, std::ios::beg);
-
-	std::vector<UCHAR> buffer(fileSize);
-
-	if (!stream.read(reinterpret_cast<char*>(buffer.data()), fileSize)) {
-		return {};
-	}
-
-	return buffer;
+	return {};
 	
 }

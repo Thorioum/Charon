@@ -19,7 +19,6 @@ namespace MemExternal {
 	HMODULE getLoadedModule(HANDLE handle, const char* modName);
 	ULONG getModuleSize(HANDLE handle, HMODULE module);
 
-	//for testing
 	void suspendAllThreads(HANDLE handle);
 	void resumeAllThreads(HANDLE handle);
 	void suspendByfronThreads(HANDLE handle);
@@ -64,11 +63,10 @@ namespace MemInternal {
 	void __forceinline fixImports(ULONGLONG dll, 
 		decltype(&LoadLibraryA) &pLoadLibraryA, 
 		decltype(&GetModuleHandleA) &pGetModuleHandleA, 
-		decltype(&GetProcAddress) &pGetProcAddress ) {
+		decltype(&GetProcAddress) &pGetProcAddress, ULONGLONG* status) {
         auto* dosHeader = (IMAGE_DOS_HEADER*)(dll);
         auto* ntHeaders = (IMAGE_NT_HEADERS*)(dll + dosHeader->e_lfanew);
         auto* optionalHeader = &ntHeaders->OptionalHeader;
-        auto size = optionalHeader->SizeOfImage;
 
         auto& importDir = optionalHeader->DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT];
         if (importDir.Size) {
@@ -101,6 +99,7 @@ namespace MemInternal {
                     thunk++;
                     func++;
                 }
+                
                 importDesc++;
             }
         }

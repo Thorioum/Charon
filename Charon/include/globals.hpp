@@ -1,15 +1,9 @@
 #pragma once
 #include <string>
 
-const std::string robloxVersion = "version-3c1b78b767674c66";
-using Stk_t = void**;
+#define END_MARKER goto __scf_skip_end;__debugbreak();__debugbreak();__scf_skip_end:{};
+constexpr ULONG END_MARKER_SIG = 0x02EB04EB; //jmprel+4,jmprel+2 //^^ the above instructions translate to this
+constexpr ULONGLONG STACK_PLACEHOLDER = 0x1493028DEAD;
 
-#define SCF_WRAP_START _Pragma("optimize(\"\", off)")
-#define SCF_WRAP_END _Pragma("optimize(\"\", on)")
-
-#define SCF_END goto __scf_skip_end;__debugbreak();__debugbreak();__scf_skip_end:{};
-constexpr ULONG SCF_END_MARKER = 0x02EB04EB; //^^ the above instructions translate to this
-constexpr ULONGLONG SCF_STACK_PLACEHOLDER = 0x1493028DEAD;
-
-#define SCF_STACK *const_cast<Stk_t*>(&__scf_ptr_stk);
-#define SCF_START const Stk_t __scf_ptr_stk = reinterpret_cast<const Stk_t>(SCF_STACK_PLACEHOLDER); Stk_t Stack = SCF_STACK;
+#define SCF_STACK *const_cast<void***>(&__scf_ptr_stk);
+#define DEFINE_STACK const void** __scf_ptr_stk = reinterpret_cast<const void**>(STACK_PLACEHOLDER); void** Stack = SCF_STACK;

@@ -7,14 +7,12 @@
 #include <iostream>
 #include <tchar.h>
 #include <ranges>
+#include <pdh.h>
+#include <pdhmsg.h>
+#include <wct.h>
+#pragma comment(lib, "pdh.lib")
 
-typedef ULONG(WINAPI* NtQueryInformationThread_t)(
-    HANDLE ThreadHandle,
-    THREADINFOCLASS ThreadInformationClass,
-    PVOID ThreadInformation,
-    ULONG ThreadInformationLength,
-    PULONG ReturnLength
-    );
+
 struct HandleDisposer {
     using pointer = HANDLE;
     void operator()(HANDLE handle) const {
@@ -287,7 +285,13 @@ ULONGLONG MemExternal::getThreadStartAddr(HANDLE threadHandle)
         std::cerr << "Failed to load ntdll.dll. Error: " << GetLastError() << std::endl;
         return 0;
     }
-
+    typedef ULONG(WINAPI* NtQueryInformationThread_t)(
+        HANDLE ThreadHandle,
+        THREADINFOCLASS ThreadInformationClass,
+        PVOID ThreadInformation,
+        ULONG ThreadInformationLength,
+        PULONG ReturnLength
+        );
     NtQueryInformationThread_t pNtQueryInformationThread =
         (NtQueryInformationThread_t)GetProcAddress(hNtDll, "NtQueryInformationThread");
     if (!pNtQueryInformationThread) {
@@ -367,9 +371,12 @@ void MemExternal::suspendByfronThreads(HANDLE handle)
         if (hThread != NULL) {
             ULONG_PTR start = getThreadStartAddr(hThread);
             if (start > (ULONGLONG)byfron && start < (ULONGLONG)byfron + byfronSize) {
-                if (SuspendThread(hThread) == (DWORD)-1);
-                CloseHandle(hThread);
+                spdlog::info("Suspending byfron thread: {}", threadId);
+                if (SuspendThread(hThread) == (DWORD)-1) {
+                    spdlog::warn("Failed to suspend byfron thread: {} Err: {}", threadId, GetLastError());
+                }
             }
+            CloseHandle(hThread);
         }
     }
     return;

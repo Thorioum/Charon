@@ -1,6 +1,8 @@
 
 #include <iostream>
 #include <spdlog/spdlog.h>
+#include <argparse/argparse.hpp>
+
 #include "../include/manualmapper.hpp"
 #include "../include/util.hpp"
 int main(int argc, char* argv[]) {
@@ -18,11 +20,34 @@ int main(int argc, char* argv[]) {
 		"`\"Y8888Y\"\'     88       88  `\"8bbdP\"Y8  88           `\"YbbdP\"\'   88       88    \n";
 	Util::resetTextColor();
 
+
+	argparse::ArgumentParser parser("Charon");
+
+	parser.add_description(
+		"A Manual Map DLL Injector for Roblox. Most probably detected. Features absolutely no smart bypasses and your dll threads will probably cease to function after 30 seconds or so");
+	parser.add_epilog("https://thorioum.net");
+	parser.add_argument("-d", "--dll").required().help("the path to the dll to inject");
+	try
+	{
+		parser.parse_args(argc, argv);
+	}
+	catch (const std::exception& ex)
+	{
+		spdlog::error("Error Parsing Args: {}", ex.what());
+		return 1;
+	}
+
+	std::string dllPath = parser.get< std::string >("dll");
 	spdlog::info("Waiting for RobloxPlayerBeta.exe. . .");
+	while (FindWindowW(nullptr, L"Roblox") == NULL)
+	{
+		Sleep(200);
+	}
 	HANDLE robloxHandle = MemExternal::WaitForProcess(PROCESS_ALL_ACCESS, FALSE, "RobloxPlayerBeta.exe").first;
+
 	spdlog::info("Succesfully opened handle to Roblox!");
 
-	ManualMapper::inject(robloxHandle, "testing.dll");
+	ManualMapper::inject(robloxHandle, dllPath);
 
 	CloseHandle(robloxHandle);
 }
