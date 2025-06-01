@@ -2,7 +2,7 @@
 
 ---
 # Usage
-- Either build yourself with CMAKE, grab from releases, or grab from build artifacts
+- Either build yourself with CMAKE (No Debug Mode), grab from releases, or grab from build artifacts
 - Run with ``` Charon.exe -d <Path to DLL> ```
 
 # Preview of program
